@@ -1,0 +1,6 @@
+{
+  "name": "Net Term",
+  "description": "Terminal for SSH and Serial Port.",
+  "requestFramePermissions": ["serial"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
