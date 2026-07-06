@@ -8,11 +8,16 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    title: 'Net Term',
+    autoHideMenuBar: true,
+    icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     }
   });
+  
+  mainWindow.removeMenu();
 
   // Handle Web Serial API permissions automatically
   mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {

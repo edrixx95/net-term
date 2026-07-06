@@ -16,14 +16,15 @@
   },
   "build": {
     "appId": "com.net-term.app",
-    "productName": "NetTerm",
+    "productName": "Net Term",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "electron-main.cjs",
-      "package.json"
+      "package.json",
+      "build/icon.png"
     ],
     "win": {
       "target": "nsis"
