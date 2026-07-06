@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "xterm/css/xterm.css";
 import { Device, TerminalSession } from "../types";
 import { useStore } from "../store";
-import { Download, X, AlertCircle, Copy, Terminal as TerminalIcon, Eraser } from "lucide-react";
+import { Download, X, AlertCircle, Copy, Terminal as TerminalIcon, Eraser, ClipboardPaste } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 interface Props {
@@ -22,6 +22,45 @@ export function TerminalComponent({ session, index }: Props) {
   const wsRef = useRef<WebSocket | null>(null);
   const serialPortRef = useRef<any>(null);
   const logDataRef = useRef<string>("");
+  const activeMacroRef = useRef<{ nodes: any[], edges: any[], currentNodeId: string | null } | null>(null);
+  const reconnectRef = useRef<(() => void) | null>(null);
+
+  const stepMacro = () => {
+    if (!activeMacroRef.current || !activeMacroRef.current.currentNodeId) return;
+    const { nodes, edges, currentNodeId } = activeMacroRef.current;
+    
+    const outgoingEdges = edges.filter(e => e.source === currentNodeId);
+    if (outgoingEdges.length === 0) {
+      activeMacroRef.current = null; // finished
+      return;
+    }
+    
+    // just follow the first edge for simplicity
+    const nextNodeId = outgoingEdges[0].target;
+    activeMacroRef.current.currentNodeId = nextNodeId;
+    
+    const nextNode = nodes.find(n => n.id === nextNodeId);
+    if (nextNode) {
+      if (nextNode.type === 'command') {
+        const cmd = nextNode.data.command + "\r\n";
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: "data", payload: btoa(cmd) }));
+        } else if (serialPortRef.current && serialPortRef.current.writable) {
+          const writer = serialPortRef.current.writable.getWriter();
+          writer.write(new TextEncoder().encode(cmd));
+          writer.releaseLock();
+        }
+        // Immediately step to next if it's a command
+        setTimeout(() => stepMacro(), 100);
+      } else if (nextNode.type === 'wait') {
+        // do nothing, handleData will trigger next step
+        logDataRef.current = "";
+      } else {
+        // unknown node type, just step
+        setTimeout(() => stepMacro(), 100);
+      }
+    }
+  };
 
   useEffect(() => {
     if (!terminalRef.current || !device) return;
@@ -56,10 +95,24 @@ export function TerminalComponent({ session, index }: Props) {
     });
 
     const handleData = (data: string | Uint8Array) => {
-      if (typeof data === "string") {
-        terminal.write(data);
-      } else {
-        terminal.write(data);
+      const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      terminal.write(data);
+      
+      if (activeMacroRef.current && activeMacroRef.current.currentNodeId) {
+        logDataRef.current += text;
+        if (logDataRef.current.length > 5000) {
+          logDataRef.current = logDataRef.current.slice(-5000);
+        }
+        
+        const { nodes, currentNodeId } = activeMacroRef.current;
+        const currentNode = nodes.find(n => n.id === currentNodeId);
+        if (currentNode && currentNode.type === 'wait') {
+          const waitText = currentNode.data.text;
+          if (waitText && logDataRef.current.includes(waitText)) {
+            logDataRef.current = "";
+            setTimeout(() => stepMacro(), 100);
+          }
+        }
       }
     };
 
@@ -70,6 +123,7 @@ export function TerminalComponent({ session, index }: Props) {
 
     const attemptReconnect = () => {
       if (isCleanTeardown) return;
+      if (device.autoReconnect === false) return;
       if (attempts < MAX_ATTEMPTS) {
         attempts++;
         clearTimeout(reconnectTimer);
@@ -188,6 +242,7 @@ export function TerminalComponent({ session, index }: Props) {
       }
     };
 
+    reconnectRef.current = connectLogic;
     connectLogic();
 
     const resizeObserver = new ResizeObserver(() => {
@@ -250,23 +305,59 @@ export function TerminalComponent({ session, index }: Props) {
     }
   };
 
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: "data", payload: btoa(text) }));
+        } else if (serialPortRef.current && serialPortRef.current.writable) {
+          const writer = serialPortRef.current.writable.getWriter();
+          writer.write(new TextEncoder().encode(text));
+          writer.releaseLock();
+        }
+      }
+    } catch (err) {
+      console.error("Failed to read clipboard contents: ", err);
+    }
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    handlePaste();
+  };
+
   const isActive = activeSessionId === session.id;
 
   useEffect(() => {
-    const handleMacro = (e: any) => {
+    const handleMacroEvent = (e: any) => {
       if (isActive && term) {
-        const script = e.detail;
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-           wsRef.current.send(JSON.stringify({ type: "data", payload: btoa(script) }));
-        } else if (serialPortRef.current && serialPortRef.current.writable) {
-           const writer = serialPortRef.current.writable.getWriter();
-           writer.write(new TextEncoder().encode(script));
-           writer.releaseLock();
+        const macro = e.detail;
+        if (macro.nodes && macro.nodes.length > 0) {
+          const triggerNode = macro.nodes.find((n: any) => n.type === 'trigger');
+          if (triggerNode) {
+            activeMacroRef.current = {
+              nodes: macro.nodes,
+              edges: macro.edges || [],
+              currentNodeId: triggerNode.id
+            };
+            stepMacro();
+          }
+        } else if (macro.script) {
+          // fallback to simple script execution
+          const script = macro.script + "\r\n";
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+             wsRef.current.send(JSON.stringify({ type: "data", payload: btoa(script) }));
+          } else if (serialPortRef.current && serialPortRef.current.writable) {
+             const writer = serialPortRef.current.writable.getWriter();
+             writer.write(new TextEncoder().encode(script));
+             writer.releaseLock();
+          }
         }
       }
     };
-    window.addEventListener("execute-macro", handleMacro);
-    return () => window.removeEventListener("execute-macro", handleMacro);
+    window.addEventListener("execute-macro", handleMacroEvent);
+    return () => window.removeEventListener("execute-macro", handleMacroEvent);
   }, [isActive, term]);
 
   return (
@@ -285,6 +376,9 @@ export function TerminalComponent({ session, index }: Props) {
           <span className={`font-semibold tracking-wide truncate ${isActive ? "text-emerald-400" : "text-gray-400"}`}>{session.title}</span>
         </div>
         <div className="flex items-center space-x-1">
+          <button onClick={handlePaste} className="p-1 hover:bg-[#222] hover:text-emerald-400 text-gray-500 rounded transition-colors" title="Paste (or Right Click)">
+            <ClipboardPaste size={14} />
+          </button>
           <button onClick={handleClear} className="p-1 hover:bg-[#222] hover:text-emerald-400 text-gray-500 rounded transition-colors" title="Clear Terminal">
             <Eraser size={14} />
           </button>
@@ -298,7 +392,7 @@ export function TerminalComponent({ session, index }: Props) {
       </div>
       
       {/* Terminal */}
-      <div className="flex-1 bg-[#000000] overflow-hidden p-1 relative">
+      <div className="flex-1 bg-[#000000] overflow-hidden p-1 relative" onContextMenu={handleContextMenu}>
         <div ref={terminalRef} className="h-full w-full" />
         
         <AnimatePresence>
@@ -309,9 +403,22 @@ export function TerminalComponent({ session, index }: Props) {
               exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center z-20 backdrop-blur-[2px]"
             >
-               <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" />
-               <div className="text-emerald-500 font-mono text-xs font-semibold tracking-widest uppercase shadow-black drop-shadow-md">
-                 {session.status === "connecting" ? "Connecting..." : "Connection Lost. Reconnecting..."}
+               {session.status === "connecting" || (session.status === "disconnected" && device.autoReconnect !== false) ? (
+                 <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" />
+               ) : null}
+               <div className="text-emerald-500 font-mono text-xs font-semibold tracking-widest uppercase shadow-black drop-shadow-md text-center">
+                 {session.status === "connecting" ? "Connecting..." : 
+                  (device.autoReconnect !== false ? "Connection Lost. Reconnecting..." : "Connection Closed.")}
+                 {session.status === "disconnected" && device.autoReconnect === false && (
+                   <div className="mt-4">
+                     <button 
+                       onClick={() => { if (reconnectRef.current) reconnectRef.current(); }} 
+                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded transition-colors"
+                     >
+                       Reconnect
+                     </button>
+                   </div>
+                 )}
                </div>
             </motion.div>
           )}

@@ -36,19 +36,20 @@ export function SplitPane({ direction, children, initialSize = 50, hideFirst = f
     };
   }, [isDragging, direction]);
 
-  if (hideFirst) {
-    return <div className="h-full w-full">{children[1]}</div>;
-  }
-
   return (
     <div ref={containerRef} className={`flex h-full w-full ${direction === "horizontal" ? "flex-row" : "flex-col"}`}>
-      <div style={{ [direction === "horizontal" ? "width" : "height"]: `${size}%` }} className="relative">
+      <div style={{ 
+        [direction === "horizontal" ? "width" : "height"]: hideFirst ? '0%' : `${size}%`,
+        display: hideFirst ? 'none' : 'block'
+      }} className="relative">
         {children[0]}
       </div>
-      <div
-        onMouseDown={() => setIsDragging(true)}
-        className={`${direction === "horizontal" ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize"} bg-[#1a1a1a] hover:bg-emerald-500 flex-shrink-0 z-10 transition-colors duration-200`}
-      />
+      {!hideFirst && (
+        <div
+          onMouseDown={() => setIsDragging(true)}
+          className={`${direction === "horizontal" ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize"} bg-[#1a1a1a] hover:bg-emerald-500 flex-shrink-0 z-10 transition-colors duration-200`}
+        />
+      )}
       <div className="flex-1 relative">
         {children[1]}
       </div>

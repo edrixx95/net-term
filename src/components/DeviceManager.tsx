@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { Device } from "../types";
-import { Play, Plus, Trash2, Edit2, Terminal as TerminalIcon, Usb, X, Search } from "lucide-react";
+import { Play, Plus, Trash2, Edit2, Terminal as TerminalIcon, Usb, X, Search, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 export function DeviceManager() {
@@ -9,6 +9,7 @@ export function DeviceManager() {
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingDevice, setEditingDevice] = useState<Partial<Device>>({ type: "ssh", port: 22 });
+  const [showPassword, setShowPassword] = useState(false);
   
   const [authorizedPorts, setAuthorizedPorts] = useState<any[]>([]);
 
@@ -38,8 +39,22 @@ export function DeviceManager() {
     }
   };
 
+  const isFormValid = () => {
+    if (!editingDevice.name) return false;
+    if (editingDevice.type === "ssh") {
+      return !!(editingDevice.host && editingDevice.port && editingDevice.username);
+    } else if (editingDevice.type === "serial") {
+      // serialPortId might be empty if they didn't select, but it's required to connect.
+      // let's say it's valid if they have a name, maybe they don't have the device plugged in right now.
+      // But better if we enforce serialPortId if we have authorized ports? 
+      // Actually, let's just make it required.
+      return true; // We'll keep it simple for serial for now since they might just want to save the name and baudrate
+    }
+    return false;
+  };
+
   const handleSave = () => {
-    if (editingDevice.name && editingDevice.type) {
+    if (isFormValid()) {
       if (editingId) {
         updateDevice(editingId, editingDevice);
       } else {
@@ -48,6 +63,7 @@ export function DeviceManager() {
       setIsEditing(false);
       setEditingId(null);
       setEditingDevice({ type: "ssh", port: 22 });
+      setShowPassword(false);
     }
   };
 
@@ -55,6 +71,7 @@ export function DeviceManager() {
     setEditingId(device.id);
     setEditingDevice({ ...device });
     setIsEditing(true);
+    setShowPassword(false);
   };
 
   const connectDevice = (deviceId: string) => {
@@ -141,13 +158,22 @@ export function DeviceManager() {
                       onChange={e => setEditingDevice({ ...editingDevice, port: parseInt(e.target.value as any) })}
                     />
                   </div>
-                  <input
-                    className="w-full bg-[#050505] border border-[#222] focus:border-emerald-500 rounded px-2 py-1.5 text-gray-200 outline-none transition-colors"
-                    placeholder="Password"
-                    type="password"
-                    value={editingDevice.password || ""}
-                    onChange={e => setEditingDevice({ ...editingDevice, password: e.target.value })}
-                  />
+                  <div className="relative">
+                    <input
+                      className="w-full bg-[#050505] border border-[#222] focus:border-emerald-500 rounded px-2 py-1.5 text-gray-200 outline-none transition-colors pr-8"
+                      placeholder="Password"
+                      type={showPassword ? "text" : "password"}
+                      value={editingDevice.password || ""}
+                      onChange={e => setEditingDevice({ ...editingDevice, password: e.target.value })}
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </>
               ) : (
                 <>
@@ -184,9 +210,26 @@ export function DeviceManager() {
                   />
                 </>
               )}
+              
+              <label className="flex items-center space-x-2 mt-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editingDevice.autoReconnect || false}
+                  onChange={e => setEditingDevice({ ...editingDevice, autoReconnect: e.target.checked })}
+                  className="accent-emerald-500"
+                />
+                <span className="text-gray-300">Auto Reconnect</span>
+              </label>
+
               <div className="flex justify-end space-x-2 pt-2">
-                <button onClick={() => { setIsEditing(false); setEditingId(null); }} className="px-3 py-1.5 text-gray-500 hover:text-gray-300 transition-colors">Cancel</button>
-                <button onClick={handleSave} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-white font-semibold transition-colors">Save</button>
+                <button onClick={() => { setIsEditing(false); setEditingId(null); setShowPassword(false); }} className="px-3 py-1.5 text-gray-500 hover:text-gray-300 transition-colors">Cancel</button>
+                <button 
+                  onClick={handleSave} 
+                  disabled={!isFormValid()}
+                  className={`px-4 py-1.5 rounded text-white font-semibold transition-colors ${isFormValid() ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-emerald-600/50 cursor-not-allowed opacity-50'}`}
+                >
+                  Save
+                </button>
               </div>
             </div>
           </motion.div>

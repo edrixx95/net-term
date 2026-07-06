@@ -8,12 +8,15 @@ export interface Device {
   password?: string;
   baudRate?: number;
   serialPortId?: string; // Add this line
+  autoReconnect?: boolean;
 }
 
 export interface Macro {
   id: string;
   name: string;
-  script: string; // Commands separated by newlines or similar
+  script?: string;
+  nodes?: any[];
+  edges?: any[];
 }
 
 export interface TerminalSession {
